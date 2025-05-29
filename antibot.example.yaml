@@ -1,0 +1,39 @@
+backend-url: http://localhost
+config:
+  window: 86400
+  ip-forwarded-header: X-Forwarded-For
+  ip-depth: 0
+  protect-parameters: true
+  protect-routes:
+    - /
+  exclude-routes:
+    - /ajax
+  protect-file-extensions:
+    - html
+  protect-http-methods:
+    - GET
+    - HEAD
+  good-bots:
+    - apple.com
+    - archive.org
+    - commoncrawl.org
+    - duckduckgo.com
+    - facebook.com
+    - google.com
+    - googlebot.com
+    - googleusercontent.com
+    - instagram.com
+    - kagibot.org
+    - linkedin.com
+    - msn.com
+    - openalex.org
+    - twitter.com
+    - x.com
+  exempt-ips: []
+  exempt-user-agents: []
+  captcha-provider: "turnstile"
+  site-key: $ANTIBOT_SITE_KEY
+  secret-key: $ANTIBOT_SECREY_KEY
+  log-level: INFO
+  mode: prefix
+  challenge-tmpl-path: challenge.tmpl.html

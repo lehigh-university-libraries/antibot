@@ -1,0 +1,9 @@
+.git
+.github
+gha-creds-*.json
+ci
+fixtures
+docs
+renovate.json5
+*.md
+*.yaml
