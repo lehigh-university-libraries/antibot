@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/lehigh-university-libraries/antibot/pkg/antibot"
+	antibot "github.com/lehigh-university-libraries/antibot/config"
 	"sigs.k8s.io/yaml"
 )
 
