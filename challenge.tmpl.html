@@ -6,7 +6,7 @@
   <body>
     <h1>Verifying connection</h1>
     <p>One moment while we verify your network connection.</p>
-    <form action="{{ .Destination }}" method="post" id="captcha-form" accept-charset="UTF-8">
+    <form action="?challenge=true" method="post" id="captcha-form" accept-charset="UTF-8">
         <div
             data-callback="captchaCallback"
             class="{{ .FrontendKey }}"
@@ -18,6 +18,7 @@
             interval="8000"
             data-appearance="always">
         </div>
+        <input type="hidden" value="{{ .Destination }}">
     </form>
     <script type="text/javascript">
         function captchaCallback(token) {
