@@ -8,9 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
-	"regexp"
-	"slices"
 	"strings"
 	"text/template"
 	"time"
@@ -19,36 +16,25 @@ import (
 )
 
 type Config struct {
-	Window                int64    `json:"window"`
-	IPForwardedHeader     string   `json:"ip-forwarded-header"`
-	IPDepth               int      `json:"ip-depth"`
-	ProtectParameters     bool     `json:"protect-parameters"`
-	ProtectRoutes         []string `json:"protect-routes"`
-	ExcludeRoutes         []string `json:"exclude-routes"`
-	ProtectFileExtensions []string `json:"protect-file-extensions"`
-	ProtectHttpMethods    []string `json:"protect-http-methods"`
-	GoodBots              []string `json:"good-bots"`
-	ExemptIPs             []string `json:"exempt-ips"`
-	ExemptUserAgents      []string `json:"exempt-user-agents"`
-	ChallengeTmpl         string   `json:"challenge-tmpl-path"`
-	CaptchaProvider       string   `json:"captcha-provider"`
-	SiteKey               string   `json:"site-key"`
-	SecretKey             string   `json:"secret-key"`
-	LogLevel              string   `json:"log-level,omitempty"`
-	Mode                  string   `json:"mode"`
+	Window            int64    `json:"window"`
+	IPForwardedHeader string   `json:"ip-forwarded-header"`
+	IPDepth           int      `json:"ip-depth"`
+	GoodBots          []string `json:"good-bots"`
+	ProtectParameters bool     `json:"protectParameters"`
+	ChallengeTmpl     string   `json:"challenge-tmpl-path"`
+	CaptchaProvider   string   `json:"captcha-provider"`
+	SiteKey           string   `json:"site-key"`
+	SecretKey         string   `json:"secret-key"`
 }
 
 type AntiBot struct {
-	config             *Config
-	verifiedCache      *lru.Cache
-	botCache           *lru.Cache
-	captchaConfig      CaptchaConfig
-	exemptIps          []*net.IPNet
-	tmpl               *template.Template
-	ipv4Mask           net.IPMask
-	ipv6Mask           net.IPMask
-	protectRoutesRegex []*regexp.Regexp
-	excludeRoutesRegex []*regexp.Regexp
+	config        *Config
+	verifiedCache *lru.Cache
+	botCache      *lru.Cache
+	captchaConfig CaptchaConfig
+	tmpl          *template.Template
+	ipv4Mask      net.IPMask
+	ipv6Mask      net.IPMask
 }
 
 type CaptchaConfig struct {
@@ -62,49 +48,8 @@ type captchaResponse struct {
 }
 
 func NewAntiBot(config *Config) (*AntiBot, error) {
-
 	expiration := time.Duration(config.Window) * time.Second
 	slog.Debug("Captcha config", "config", config)
-
-	if len(config.ProtectRoutes) == 0 && config.Mode != "suffix" {
-		return nil, fmt.Errorf("you must protect at least one route with the protectRoutes config value. / will cover your entire site")
-	}
-
-	protectRoutesRegex := []*regexp.Regexp{}
-	excludeRoutesRegex := []*regexp.Regexp{}
-	if config.Mode == "regex" {
-		for _, r := range config.ProtectRoutes {
-			cr, err := regexp.Compile(r)
-			if err != nil {
-				return nil, fmt.Errorf("invalid regex in protectRoutes: %s", r)
-			}
-			protectRoutesRegex = append(protectRoutesRegex, cr)
-		}
-		for _, r := range config.ExcludeRoutes {
-			cr, err := regexp.Compile(r)
-			if err != nil {
-				return nil, fmt.Errorf("invalid regex in excludeRoutes: %s", r)
-			}
-			excludeRoutesRegex = append(excludeRoutesRegex, cr)
-		}
-	} else if config.Mode != "prefix" && config.Mode != "suffix" {
-		return nil, fmt.Errorf("unknown mode: %s. Supported values are prefix, suffix, and regex", config.Mode)
-	}
-
-	// put exempt user agents in lowercase for quicker comparisons
-	ua := []string{}
-	for _, a := range config.ExemptUserAgents {
-		ua = append(ua, strings.ToLower(a))
-	}
-	config.ExemptUserAgents = ua
-
-	if len(config.ProtectHttpMethods) == 0 {
-		config.ProtectHttpMethods = []string{
-			"GET",
-			"HEAD",
-		}
-	}
-	config.ParseHttpMethods()
 
 	var tmpl *template.Template
 	if _, err := os.Stat(config.ChallengeTmpl); os.IsNotExist(err) {
@@ -118,36 +63,11 @@ func NewAntiBot(config *Config) (*AntiBot, error) {
 		}
 	}
 
-	if !slices.Contains(config.ProtectFileExtensions, "html") {
-		config.ProtectFileExtensions = append(config.ProtectFileExtensions, "html")
-	}
-
-	// transform exempt IP strings into what go can easily parse (net.IPNet)
-	var ips []*net.IPNet
-	exemptIps := []string{
-		"127.0.0.0/8",
-		"10.0.0.0/8",
-		"172.16.0.0/12",
-		"192.168.0.0/16",
-		"fc00::/8",
-	}
-	exemptIps = append(exemptIps, config.ExemptIPs...)
-	for _, ip := range exemptIps {
-		parsedIp, err := ParseCIDR(ip)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing cidr %s: %v", ip, err)
-		}
-		ips = append(ips, parsedIp)
-	}
-
 	ab := AntiBot{
-		config:             config,
-		botCache:           lru.New(expiration, 1*time.Hour),
-		verifiedCache:      lru.New(expiration, 1*time.Hour),
-		exemptIps:          ips,
-		tmpl:               tmpl,
-		protectRoutesRegex: protectRoutesRegex,
-		excludeRoutesRegex: excludeRoutesRegex,
+		config:        config,
+		botCache:      lru.New(expiration, 1*time.Hour),
+		verifiedCache: lru.New(expiration, 1*time.Hour),
+		tmpl:          tmpl,
 	}
 
 	// set the captcha config based on the provider
@@ -182,20 +102,14 @@ func NewAntiBot(config *Config) (*AntiBot, error) {
 func (ab *AntiBot) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		clientIP, _ := ab.getClientIP(req)
+		slog.Debug("Checking IP", "ip", clientIP)
 		if req.Method == http.MethodPost {
-			response := req.FormValue(ab.captchaConfig.key + "-response")
-			if response == "" {
-				if !slices.Contains(ab.config.ProtectHttpMethods, req.Method) {
-					next.ServeHTTP(rw, req)
-					return
-				}
-			} else {
-				statusCode := ab.verifyChallengePage(rw, req, clientIP)
-				slog.Info("Captcha challenge", "clientIP", clientIP, "method", req.Method, "path", req.URL.Path, "status", statusCode, "useragent", req.UserAgent())
-				if statusCode != http.StatusOK {
-					return
-				}
+			statusCode := ab.verifyChallengePage(rw, req, clientIP)
+			slog.Info("Captcha challenge", "clientIP", clientIP, "method", req.Method, "path", req.URL.Path, "status", statusCode, "useragent", req.UserAgent())
+			if statusCode == http.StatusOK {
+				next.ServeHTTP(rw, req)
 			}
+			return
 		}
 
 		if !ab.shouldApply(req, clientIP) {
@@ -225,8 +139,16 @@ func (ab *AntiBot) serveChallengePage(rw http.ResponseWriter, destination string
 }
 
 func (ab *AntiBot) verifyChallengePage(rw http.ResponseWriter, req *http.Request, ip string) int {
-	response := req.FormValue(ab.captchaConfig.key + "-response")
+	err := req.ParseForm()
+	if err != nil {
+		slog.Error("Failed to parse form", "error", err)
+		http.Error(rw, "Bad request", http.StatusBadRequest)
+		return http.StatusBadRequest
+	}
+
+	response := req.PostFormValue(ab.captchaConfig.key + "-response")
 	if response == "" {
+		slog.Error("Expected form value not in request")
 		http.Error(rw, "Bad request", http.StatusBadRequest)
 		return http.StatusBadRequest
 	}
@@ -234,6 +156,7 @@ func (ab *AntiBot) verifyChallengePage(rw http.ResponseWriter, req *http.Request
 	var body = url.Values{}
 	body.Add("secret", ab.config.SecretKey)
 	body.Add("response", response)
+	slog.Debug("Validating", "url", ab.captchaConfig.validate)
 	resp, err := http.PostForm(ab.captchaConfig.validate, body)
 	if err != nil {
 		slog.Error("Unable to validate captcha", "url", ab.captchaConfig.validate, "body", body, "err", err)
@@ -261,16 +184,8 @@ func (ab *AntiBot) verifyChallengePage(rw http.ResponseWriter, req *http.Request
 }
 
 func (ab *AntiBot) shouldApply(req *http.Request, clientIP string) bool {
-	if !slices.Contains(ab.config.ProtectHttpMethods, req.Method) {
-		return false
-	}
-
 	_, verified := ab.verifiedCache.Get(clientIP)
 	if verified {
-		return false
-	}
-
-	if IsIpExcluded(clientIP, ab.exemptIps) {
 		return false
 	}
 
@@ -278,129 +193,7 @@ func (ab *AntiBot) shouldApply(req *http.Request, clientIP string) bool {
 		return false
 	}
 
-	if ab.isGoodUserAgent(req.UserAgent()) {
-		return false
-	}
-
-	if ab.config.Mode == "regex" {
-		return ab.RouteIsProtectedRegex(req.URL.Path)
-	}
-
-	if ab.config.Mode == "suffix" {
-		return ab.RouteIsProtectedSuffix(req.URL.Path)
-	}
-
-	return ab.RouteIsProtectedPrefix(req.URL.Path)
-}
-
-func (ab *AntiBot) RouteIsProtectedPrefix(path string) bool {
-protected:
-	for _, route := range ab.config.ProtectRoutes {
-		if !strings.HasPrefix(path, route) {
-			continue
-		}
-
-		// we're on a protected route - make sure this route doesn't have an exclusion
-		for _, eRoute := range ab.config.ExcludeRoutes {
-			if strings.HasPrefix(path, eRoute) {
-				continue protected
-			}
-		}
-
-		// if this path isn't a file, go ahead and mark this path as protected
-		ext := filepath.Ext(path)
-		ext = strings.TrimPrefix(ext, ".")
-		if ext == "" {
-			return true
-		}
-
-		// if we have a file extension, see if we should protect this file extension type
-		for _, protectedExtensions := range ab.config.ProtectFileExtensions {
-			if strings.EqualFold(ext, protectedExtensions) {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-func (ab *AntiBot) RouteIsProtectedSuffix(path string) bool {
-protected:
-	for _, route := range ab.config.ProtectRoutes {
-		cleanPath := path
-		ext := filepath.Ext(path)
-		if ext != "" {
-			cleanPath = strings.TrimSuffix(path, ext)
-		}
-		if !strings.HasSuffix(cleanPath, route) {
-			continue
-		}
-
-		// we're on a protected route - make sure this route doesn't have an exclusion
-		for _, eRoute := range ab.config.ExcludeRoutes {
-			if strings.HasPrefix(cleanPath, eRoute) {
-				continue protected
-			}
-		}
-
-		// if this path isn't a file, go ahead and mark this path as protected
-		ext = strings.TrimPrefix(ext, ".")
-		if ext == "" {
-			return true
-		}
-
-		// if we have a file extension, see if we should protect this file extension type
-		for _, protectedExtensions := range ab.config.ProtectFileExtensions {
-			if strings.EqualFold(ext, protectedExtensions) {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-func (ab *AntiBot) isGoodUserAgent(ua string) bool {
-	ua = strings.ToLower(ua)
-	for _, agentPrefix := range ab.config.ExemptUserAgents {
-		if strings.HasPrefix(ua, agentPrefix) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func (ab *AntiBot) RouteIsProtectedRegex(path string) bool {
-protected:
-	for _, routeRegex := range ab.protectRoutesRegex {
-		matched := routeRegex.MatchString(path)
-		if !matched {
-			continue
-		}
-
-		for _, excludeRegex := range ab.excludeRoutesRegex {
-			excluded := excludeRegex.MatchString(path)
-			if excluded {
-				continue protected
-			}
-		}
-
-		ext := filepath.Ext(path)
-		ext = strings.TrimPrefix(ext, ".")
-		if ext == "" {
-			return true
-		}
-
-		for _, protectedExtension := range ab.config.ProtectFileExtensions {
-			if strings.EqualFold(ext, protectedExtension) {
-				return true
-			}
-		}
-	}
-
-	return false
+	return true
 }
 
 func (ab *AntiBot) getClientIP(req *http.Request) (string, string) {
@@ -411,9 +204,6 @@ func (ab *AntiBot) getClientIP(req *http.Request) (string, string) {
 		ip = ""
 		for i := len(components) - 1; i >= 0; i-- {
 			_ip := strings.TrimSpace(components[i])
-			if IsIpExcluded(_ip, ab.exemptIps) {
-				continue
-			}
 			if depth == 0 {
 				ip = _ip
 				break
@@ -481,7 +271,7 @@ func (ab *AntiBot) SetIpv6Mask(m int) error {
 
 func (ab *AntiBot) isGoodBot(req *http.Request, clientIP string) bool {
 	if ab.config.ProtectParameters {
-		if len(req.URL.Query()) > 0 {
+		if len(req.Header.Get("X-Forwarded-Uri")) > 0 {
 			return false
 		}
 	}
@@ -494,20 +284,4 @@ func (ab *AntiBot) isGoodBot(req *http.Request, clientIP string) bool {
 	v := IsIpGoodBot(clientIP, ab.config.GoodBots)
 	ab.botCache.Set(clientIP, v, lru.DefaultExpiration)
 	return v
-}
-
-func (ab *AntiBot) SetExemptIps(exemptIps []*net.IPNet) {
-	ab.exemptIps = exemptIps
-}
-
-// log a warning if protected methods contains an invalid method
-func (c *Config) ParseHttpMethods() {
-	for _, method := range c.ProtectHttpMethods {
-		switch method {
-		case "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "CONNECT", "OPTIONS", "TRACE":
-			continue
-		default:
-			slog.Warn("unknown http method", "method", method)
-		}
-	}
 }

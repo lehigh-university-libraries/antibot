@@ -1,0 +1,19 @@
+services:
+  antibot:
+    image: antibot:latest
+    environment:
+        LOG_LEVEL: DEBUG
+        ANTIBOT_SITE_KEY: 1x00000000000000000000AA
+        ANTIBOT_SECRET_KEY: 1x0000000000000000000000000000000AA
+    build:
+      context: ..
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./conf/antibot/antibot.yaml:/app/antibot.yaml:ro
+  apache:
+    image: httpd:antibot
+    build:
+      context: ./conf/apache
+    ports:
+      - "8080:80"

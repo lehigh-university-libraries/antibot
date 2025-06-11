@@ -20,5 +20,5 @@ good-bots:
   - x.com
 captcha-provider: "turnstile"
 site-key: $ANTIBOT_SITE_KEY
-secret-key: $ANTIBOT_SECREY_KEY
-challenge-tmpl-path: challenge.tmpl.html
+secret-key: $ANTIBOT_SECRET_KEY
+challenge-tmpl-path: /app/challenge.tmpl.html

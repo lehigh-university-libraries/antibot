@@ -2,12 +2,12 @@ FROM golang:1.24-alpine3.21@sha256:ef18ee7117463ac1055f5a370ed18b8750f01589f13ea
 
 WORKDIR /app
 
-RUN adduser -S -G nobody antibot
+RUN apk add --no-cache curl && \
+  adduser -S -G nobody antibot
 
 COPY --chown=antibot:antibot . ./
 
-RUN apk add --no-cache curl && \
-  go mod download && \
+RUN go mod download && \
   go build -o /app/antibot && \
   go clean -cache -modcache
 
